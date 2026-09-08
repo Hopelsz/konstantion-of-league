@@ -198,7 +198,7 @@ function SetupWindow(): JSX.Element {
         }}
       >
         <span style={{ fontSize: '12px', color: gold, letterSpacing: '0.08em' }}>
-          康斯坦丁 — 配置
+          Konstantion of League — 配置
         </span>
         <div
           className="window-no-drag"
@@ -254,7 +254,7 @@ function SetupWindow(): JSX.Element {
             </text>
           </svg>
           <h3 style={{ margin: '0 0 0.35rem', fontSize: '1.15rem', color: '#f0e6d2' }}>
-            欢迎使用康斯坦丁
+            欢迎使用 Konstantion of League
           </h3>
           <p style={{ margin: 0, fontSize: '0.74rem', color: '#7a8a99', lineHeight: 1.6 }}>
             配置完成后自动转入后台运行（托盘常驻）

@@ -1,4 +1,4 @@
-# League Skins（康斯坦丁）
+# Konstantion of League
 
 一款基于 [cslol-manager](https://github.com/LeagueToolkit/cslol-manager) 的《英雄联盟》Windows 换肤工具。程序无主界面，安装后常驻系统托盘，进入游戏选人阶段时自动弹出悬浮窗，点选即换肤。
 
@@ -46,6 +46,17 @@ pnpm build:win
 ```
 
 > 开发调试小技巧：dev 模式下启动约 1 秒后会自动弹出一个悬浮窗用于预览布局，设置环境变量 `LEAGUE_SKINS_DEBUG_FLOAT=0` 可关闭。
+
+
+## 更新内置皮肤元数据
+
+程序离线运行，识别新英雄/新皮肤靠打包在内的 `resources/skins_metadata.json`，它**不会**随英雄联盟版本自动更新。建议每逢游戏大版本更新跑一次：
+
+```bash
+pnpm update:metadata
+```
+
+脚本会从 CommunityDragon（简体中文档位）下载最新 `skins.json`，校验结构无误后覆盖 `resources/skins_metadata.json`。随后随下一次打包发版；老用户升级新版本时，程序会通过内置文件指纹自动覆盖其本地旧副本，无需手动清理。
 
 
 ## 免责声明

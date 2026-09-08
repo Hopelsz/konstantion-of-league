@@ -12,10 +12,6 @@ const api = {
   askAndSetLeaguePath: (): Promise<boolean | null> => ipcRenderer.invoke('askAndSetLeaguePath'),
   askAndSelectLocalSkins: (): Promise<string | null> =>
     ipcRenderer.invoke('askAndSelectLocalSkins'),
-  downloadCsLolManager: (): Promise<void> => ipcRenderer.invoke('downloadCsLolManager'),
-  downloadLolSkins: (force: boolean = false): Promise<void> =>
-    ipcRenderer.invoke('downloadLolSkins', force),
-  cancelDownloadLolSkins: (): Promise<void> => ipcRenderer.invoke('cancelDownloadLolSkins'),
   useLocalLolSkins: (localPath: string): Promise<void> =>
     ipcRenderer.invoke('useLocalLolSkins', localPath),
   checkLolSkinsExist: (): Promise<boolean> => ipcRenderer.invoke('checkLolSkinsExist'),
@@ -40,7 +36,6 @@ const api = {
   setFloatWindowPosition: (position: FloatWindowPosition): Promise<void> => ipcRenderer.invoke('setFloatWindowPosition', position),
   getMultiChampionSkinEnabled: (): Promise<boolean> => ipcRenderer.invoke('getMultiChampionSkinEnabled'),
   setMultiChampionSkinEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('setMultiChampionSkinEnabled', enabled),
-  refreshLolSkins: (forceMetadata = false): Promise<Skin[]> => ipcRenderer.invoke('refreshLolSkins', forceMetadata),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('getAppVersion'),
   // Window controls
   minimizeWindow: (): void => ipcRenderer.send('window-minimize'),

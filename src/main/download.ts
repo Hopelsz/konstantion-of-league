@@ -1,22 +1,16 @@
 /**
  * ┌───────────────────────────────────────────────────────────────────────────────┐
- * │ This module is used to download external dependencies and store them in the   │
- * │ file system when they're not already present. It also handles processing of   │
- * │ the downloaded files to ensure they're in the correct format.                 │
+ * │ 皮肤文件的本地化管理：皮肤目录定位 / 导入校验 / 磁盘扫描。                     │
+ * │ 单机化设计：不联网下载皮肤包，皮肤一律由用户从本地目录导入（.fantome/.zip）。  │
  * └───────────────────────────────────────────────────────────────────────────────┘
  */
 
+import crypto from 'crypto'
 import fs from 'fs-extra'
 import path from 'path'
-import https from 'https'
-import JSZip from 'jszip'
-import { Mutex } from 'async-mutex'
 
 import {
-  LOL_SKINS_URL,
   LOL_SKINS_LOCATION,
-  LOL_SKINS_DESTINATION,
-  LOL_SKINS_METADATA_URL,
   LOL_SKINS_METADATA_LOCATION,
   LOL_SKINS_METADATA_FALLBACK
 } from './constants'
@@ -25,22 +19,18 @@ import { getConfigValue, setConfigValue } from './config'
 import {
   type Champion,
   type Skin,
+  invalidateMetadataCache,
   listChampions,
   listSkins,
-  getChampSkinIdFromSkinId,
   normalizeName
 } from './metadata'
-
-const downloadMutex = new Mutex()
-const metadataMutex = new Mutex()
-let downloadCancelled = false
 
 // 缓存 getExistingSkins 结果，避免每次切换英雄都扫描磁盘
 let cachedExistingSkins: Skin[] | null = null
 let cachedExistingSkinsLocation: string | null = null
 
 /**
- * 清除 getExistingSkins 缓存，在重新下载元数据或更换 skins 路径后调用。
+ * 清除 getExistingSkins 缓存，在更换 skins 路径后调用。
  */
 export function invalidateExistingSkinsCache(): void {
   cachedExistingSkins = null
@@ -48,24 +38,44 @@ export function invalidateExistingSkinsCache(): void {
 }
 
 /**
- * 取消正在进行的下载
+ * 指纹同步：确保 userData 本地副本与内置文件内容一致。
+ * 单机化设计：打包的 resources/skins_metadata.json 是权威数据源——应用升级后内置文件更新，
+ * 与旧副本指纹不一致时覆盖之；一致（含首次缺失）则按需复制/跳过，保证老副本不"过期"。
  */
-export function cancelDownloadLolSkins(): void {
-  downloadCancelled = true
+export async function downloadLolSkinsMetadata(): Promise<void> {
+  if (!(await locationExists(LOL_SKINS_METADATA_FALLBACK))) return
+  try {
+    if (!(await isLocalMetadataInSync())) {
+      await fs.copyFile(LOL_SKINS_METADATA_FALLBACK, LOL_SKINS_METADATA_LOCATION)
+      invalidateMetadataCache() // 副本被替换，清掉可能已解析缓存的旧元数据
+      console.log('内置元数据有更新，已同步到本地副本')
+    }
+  } catch (copyErr) {
+    console.warn('同步内置元数据失败:', copyErr)
+  }
 }
 
 /**
- * 重置取消状态
+ * 本地副本与内置文件是否一致：先比大小快速排除，再对相同大小做 sha256 指纹比对。
+ * 副本缺失或任一文件读取失败一律视为不一致，交给调用方按缺文件兜底。
  */
-function resetDownloadCancelled(): void {
-  downloadCancelled = false
-}
-
-/**
- * 检查下载是否已取消
- */
-function isDownloadCancelled(): boolean {
-  return downloadCancelled
+async function isLocalMetadataInSync(): Promise<boolean> {
+  if (!(await locationExists(LOL_SKINS_METADATA_LOCATION))) return false
+  try {
+    const [bundledStat, localStat] = await Promise.all([
+      fs.stat(LOL_SKINS_METADATA_FALLBACK),
+      fs.stat(LOL_SKINS_METADATA_LOCATION)
+    ])
+    if (bundledStat.size !== localStat.size) return false
+    const [bundled, local] = await Promise.all([
+      fs.readFile(LOL_SKINS_METADATA_FALLBACK),
+      fs.readFile(LOL_SKINS_METADATA_LOCATION)
+    ])
+    const hash = (data: Buffer): string => crypto.createHash('sha256').update(data).digest('hex')
+    return hash(bundled) === hash(local)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -77,325 +87,24 @@ export async function getSkinsLocation(): Promise<string> {
   return typeof customPath === 'string' && customPath ? customPath : LOL_SKINS_LOCATION
 }
 
-async function downloadUrlWithRetry(url: string, redirectCount: number = 0, retryCount: number = 0): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    if (redirectCount > 5) {
-      reject(new Error('Too many redirects'))
-      return
-    }
-
-    if (retryCount > 2) {
-      reject(new Error(`Failed to download after ${retryCount} retries: ${url}`))
-      return
-    }
-
-
-    const parsedUrl = new URL(url)
-    const options: https.RequestOptions = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'GET',
-      rejectUnauthorized: false,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': '*/*'
-      },
-      timeout: 15000
-    }
-
-    const req = https.request(options, (res) => {
-
-      
-      if (res.statusCode && (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308)) {
-        const location = res.headers.location
-        if (location) {
-          resolve(downloadUrlWithRetry(location, redirectCount + 1, retryCount))
-        } else {
-          reject(new Error(`Redirect without location header: ${url}`))
-        }
-        return
-      }
-
-      if (res.statusCode && res.statusCode >= 500) {
-        const delay = Math.pow(2, retryCount) * 1000
-        setTimeout(() => {
-          resolve(downloadUrlWithRetry(url, redirectCount, retryCount + 1))
-        }, delay)
-        return
-      }
-
-      if (res.statusCode && res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode}: ${url}`))
-        return
-      }
-
-      const chunks: Buffer[] = []
-      res.on('data', (chunk) => chunks.push(chunk))
-      res.on('end', () => {
-        resolve(Buffer.concat(chunks))
-      })
-    })
-
-    req.on('error', (err) => {
-      const delay = Math.pow(2, retryCount) * 1000
-      if (retryCount < 2) {
-        setTimeout(() => {
-          resolve(downloadUrlWithRetry(url, redirectCount, retryCount + 1))
-        }, delay)
-      } else {
-        reject(err)
-      }
-    })
-
-    req.on('timeout', () => {
-      const delay = Math.pow(2, retryCount) * 1000
-      if (retryCount < 2) {
-        setTimeout(() => {
-          resolve(downloadUrlWithRetry(url, redirectCount, retryCount + 1))
-        }, delay)
-      } else {
-        reject(new Error('Request timed out'))
-      }
-    })
-
-    req.end()
-  })
-}
-
 /**
- * This function decompresses a ZIP buffer into a directory.
- * @param buffer the ZIP buffer.
- * @param destination the directory to decompress the ZIP into.
- * @returns {Promise<void>} when the operation is finished.
- */
-async function decompressZip(buffer: Buffer, destination: string): Promise<void> {
-  const zip = await JSZip.loadAsync(buffer)
-
-  await Promise.all(
-    Object.keys(zip.files).map(async (filename) => {
-      const file = zip.files[filename]
-
-      // Ensure the directory exists
-      if (file.dir) await fs.ensureDir(path.join(destination, filename))
-      else {
-        // Ensure parent directory exists
-        await fs.ensureDir(path.dirname(path.join(destination, filename)))
-
-        // Write file
-        const content = await file.async('nodebuffer')
-        await fs.writeFile(path.join(destination, filename), content)
-      }
-    })
-  )
-}
-
-/**
- * This function checks if a file or directory exists.
- * @param location the path to the file or directory.
- * @returns {Promise<boolean>} whether the file or directory exists.
+ * 检查文件或目录是否存在。
+ * @param location 要检查的路径
+ * @returns {Promise<boolean>} 是否存在
  */
 async function locationExists(location: string): Promise<boolean> {
   return fs.pathExists(location)
 }
 
 /**
- * This function checks if LOL skins have already been downloaded.
- * @returns {Promise<boolean>} whether the skins directory exists and has content.
+ * 检查 LOL 皮肤是否已就绪。
+ * @returns {Promise<boolean>} 皮肤目录是否有效且含皮肤文件。
  */
 export async function checkLolSkinsExist(): Promise<boolean> {
   const skinsLocation = await getSkinsLocation()
   // B 方案：须先导入成功（skinsAvailable=true），且目录真实包含皮肤文件才打钩
   if (!(await getConfigValue('skinsAvailable'))) return false
   return hasSkinFiles(skinsLocation)
-}
-
-/**
- * This function finds a champion by name in the list of champions.
- * @param championName the name of the champion to find.
- * @param champions the list of champions to search in.
- * @returns {Champion | null} the champion if found, otherwise null.
- */
-function findChampionByName(championName: string, champions: Champion[]): Champion | null {
-  return champions.find((c) => c.name.toLowerCase() === championName.toLowerCase()) || null
-}
-
-/**
- * This function extracts the chroma ID from a filename.
- * @param filename the name of the chroma file.
- * @returns {string | null} the chroma ID if found, otherwise null.
- */
-function extractChromaId(filename: string): number | null {
-  const match = filename.match(/(\d+)\.zip$/)
-  if (!match) return null
-
-  return getChampSkinIdFromSkinId(Number(match[1])).skinId
-}
-
-/**
- * 确保元数据文件可用（本地优先，离线兜底）。
- * 单机化设计：网络只用于手动刷新时的数据更新，不参与关键路径。
- * - 本地文件已存在 → 直接使用，不联网
- * - 本地文件缺失 → 立即复制内置兜底数据（零网络等待），保证离线可用
- * - 仅 force=true（手动刷新）才尝试网络更新；失败静默降级，返回 false
- * @param force 是否强制联网更新
- * @returns 元数据是否可用（force 模式下表示网络更新是否成功）
- */
-export async function downloadLolSkinsMetadata(force: boolean = false): Promise<boolean> {
-  return metadataMutex.runExclusive(async () => {
-    // 本地文件已存在且不强制更新 → 直接用，不联网
-    if (!force && (await locationExists(LOL_SKINS_METADATA_LOCATION))) return true
-
-    // 本地文件缺失 → 先用内置兜底数据（零网络等待，保证离线可用）
-    if (!(await locationExists(LOL_SKINS_METADATA_LOCATION))) {
-      try {
-        if (await locationExists(LOL_SKINS_METADATA_FALLBACK)) {
-          await fs.copyFile(LOL_SKINS_METADATA_FALLBACK, LOL_SKINS_METADATA_LOCATION)
-          console.log('已从内置资源复制元数据（离线兜底）')
-        }
-      } catch (copyErr) {
-        console.warn('复制内置元数据失败:', copyErr)
-      }
-    }
-
-    // 非强制模式：本地兜底数据已就绪，不再联网，避免弱网卡启动
-    if (!force) return true
-
-    // 强制模式（手动刷新）：尝试网络更新，失败静默降级为本地数据
-    try {
-      const buffer = await downloadUrlWithRetry(LOL_SKINS_METADATA_URL)
-      await fs.writeFile(LOL_SKINS_METADATA_LOCATION, buffer)
-      console.log('元数据网络更新成功')
-      return true
-    } catch (networkErr) {
-      console.warn('元数据网络更新失败，继续使用本地数据:', networkErr)
-      return false
-    }
-  })
-}
-
-/**
- * This function processes skin files (currently just validates the directory).
- * @param championPath the path to the champion directory.
- */
-async function processSkinFiles(championPath: string): Promise<void> {
-  const skinFiles = await fs.readdir(championPath, { withFileTypes: true })
-
-  for (const skinFile of skinFiles) {
-    if (!skinFile.isFile()) continue
-    const isZip = skinFile.name.endsWith('.zip')
-    const isFantome = skinFile.name.endsWith('.fantome')
-    if (!isZip && !isFantome) continue
-    // Currently no processing needed - files keep their original names
-  }
-}
-
-/**
- * This function processes chroma files by renaming them to use IDs instead of names.
- * @param championPath the path to the champion directory.
- * @returns {Promise<void>} when the operation is finished.
- */
-async function processChromaFiles(championPath: string): Promise<void> {
-  const chromasPath = path.join(championPath, 'chromas')
-  if (!(await locationExists(chromasPath))) return
-
-  const chromaSubDirs = await fs.readdir(chromasPath, { withFileTypes: true })
-
-  for (const chromaSubdir of chromaSubDirs) {
-    if (!chromaSubdir.isDirectory()) continue
-
-    const chromaSkinPath = path.join(chromasPath, chromaSubdir.name)
-    const chromaZipFiles = await fs.readdir(chromaSkinPath, { withFileTypes: true })
-
-    for (const chromaZipFile of chromaZipFiles) {
-      if (!chromaZipFile.isFile() || !chromaZipFile.name.endsWith('.zip')) continue
-
-      const chromaId = extractChromaId(chromaZipFile.name)
-      if (!chromaId) continue
-
-      const oldPath = path.join(chromaSkinPath, chromaZipFile.name)
-      const newPath = path.join(championPath, `${chromaId}.fantome`)
-      await fs.move(oldPath, newPath)
-    }
-  }
-
-  await fs.remove(chromasPath)
-}
-
-/**
- * This function processes a single champion directory.
- * @param championName the name of the champion directory.
- * @param champions the list of champions.
- * @returns {Promise<void>} when the operation is finished.
- */
-async function processChampionDirectory(
-  championName: string,
-  champions: Champion[],
-  skinsLocation: string
-): Promise<void> {
-  const champion = findChampionByName(championName, champions)
-
-  if (!champion) return
-
-  // Process using original directory name (keeping Chinese names)
-  const championDir = path.join(skinsLocation, championName)
-  await processSkinFiles(championDir)
-  await processChromaFiles(championDir)
-}
-
-/**
- * This function organizes the LOL-SKINS directory structure.
- * @returns {Promise<void>} when the operation is finished.
- */
-async function organizeLolSkinsStructure(): Promise<void> {
-  const skinsLocation = await getSkinsLocation()
-  const champions = await listChampions()
-  const subdirectories = await fs.readdir(skinsLocation, { withFileTypes: true })
-
-  for (const subdir of subdirectories)
-    if (subdir.isDirectory()) await processChampionDirectory(subdir.name, champions, skinsLocation)
-}
-
-/**
- * This function downloads and unzips the LOL-SKINS repository into user data.
- * @param force whether it should ignore existing files and download new ones.
- * @returns {Promise<void>} when the operation is finished.
- */
-export async function downloadLolSkins(force: boolean = false): Promise<void> {
-  // The lock is required to prevent multiple organization starting at the same time.
-  // This could lead to race conditions in renames etc.
-  return downloadMutex.runExclusive(async () => {
-    // 重置取消状态
-    resetDownloadCancelled()
-    
-    // 下载时清除自定义路径配置，使用默认位置
-    await setConfigValue('skinsPath', '')
-    
-    // 皮肤目录已存在且不强制重新下载 → 直接用现有皮肤
-    if (!force && (await locationExists(LOL_SKINS_LOCATION))) {
-      await setConfigValue('skinsAvailable', true)
-      return
-    }
-
-    if (await locationExists(LOL_SKINS_LOCATION)) await fs.remove(LOL_SKINS_LOCATION)
-
-    await downloadLolSkinsMetadata(force)
-    
-    // 检查是否取消
-    if (isDownloadCancelled()) {
-      throw new Error('下载已取消')
-    }
-
-    const buffer = await downloadUrlWithRetry(LOL_SKINS_URL)
-    
-    // 检查是否取消
-    if (isDownloadCancelled()) {
-      throw new Error('下载已取消')
-    }
-    
-    await decompressZip(buffer, LOL_SKINS_DESTINATION)
-    await organizeLolSkinsStructure()
-    await setConfigValue('skinsAvailable', true)
-  })
 }
 
 /**
@@ -458,10 +167,10 @@ async function validateSkinsPath(skinsPath: string): Promise<boolean> {
 }
 
 /**
- * This function uses local LOL-SKINS files instead of downloading.
- * It saves the user's custom skins path to config and uses it directly.
- * @param localSkinsPath the path to the local skins directory.
- * @returns {Promise<void>} when the operation is finished.
+ * 使用本地 LOL-SKINS 文件（导入模式，替代联网下载）。
+ * 保存用户选择的皮肤路径到配置并直接使用。
+ * @param localSkinsPath 本地 skins 目录路径
+ * @returns {Promise<void>} 操作完成。
  */
 export async function useLocalLolSkins(localSkinsPath: string): Promise<void> {
   // 校验路径有效性：必须包含皮肤文件，否则"打钩成功但实际无效"
@@ -478,8 +187,8 @@ export async function useLocalLolSkins(localSkinsPath: string): Promise<void> {
   await setConfigValue('skinsPath', localSkinsPath)
   await setConfigValue('skinsAvailable', true)
 
-  // 如果有本地元数据缓存就用，没有才下载；不强制重新下载避免网络卡住
-  await downloadLolSkinsMetadata(false)
+  // 指纹同步本地元数据（副本缺失或不一致时从内置资源补齐）
+  await downloadLolSkinsMetadata()
 }
 
 /**
@@ -658,11 +367,11 @@ export async function getExistingSkins(): Promise<Skin[]> {
     if (!championDir) continue
 
     const files = await fs.readdir(championDir)
-    const normalizedSkinName = skin.name.toLowerCase().replace(/[:\s'"]/g, '').replace(/　/g, '')
+    const normalizedSkinName = skin.name.toLowerCase().replace(/[:\s'"]/g, '').replace(/\u3000/g, '')
 
     for (const file of files) {
       const fileNameWithoutExt = file.replace(/\.(zip|fantome)$/, '')
-      const normalizedFileName = fileNameWithoutExt.toLowerCase().replace(/[:\s'"]/g, '').replace(/　/g, '')
+      const normalizedFileName = fileNameWithoutExt.toLowerCase().replace(/[:\s'"]/g, '').replace(/\u3000/g, '')
       if (normalizedFileName.includes(normalizedSkinName) || normalizedSkinName.includes(normalizedFileName)) {
         existingSkins.push(skin)
         break

@@ -27,5 +27,12 @@ export default tseslint.config(
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },
+  {
+    // JS 工具脚本（scripts/*.mjs 等）无 TS 类型系统，跳过 TS 专用规则
+    files: ['**/*.{js,mjs,cjs}'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

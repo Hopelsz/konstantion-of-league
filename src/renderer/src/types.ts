@@ -50,8 +50,6 @@ export interface Api {
   isCurrentLeaguePathValid: () => Promise<boolean>
   askAndSetLeaguePath: () => Promise<boolean | null>
   askAndSelectLocalSkins: () => Promise<string | null>
-  downloadLolSkins: (force?: boolean) => Promise<void>
-  cancelDownloadLolSkins: () => Promise<void>
   useLocalLolSkins: (localPath: string) => Promise<void>
   checkLolSkinsExist: () => Promise<boolean>
   listSkins: () => Promise<Skin[]>
@@ -65,7 +63,6 @@ export interface Api {
   >
   getCurrentSkinId: () => Promise<string | null>
   getChampionSkinId: (championId: number) => Promise<string | null>
-  refreshLolSkins: (forceMetadata?: boolean) => Promise<Skin[]>
   getAppVersion: () => Promise<string>
   minimizeWindow: () => void
   maximizeWindow: () => void

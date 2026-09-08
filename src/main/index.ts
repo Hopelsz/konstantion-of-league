@@ -52,7 +52,7 @@ function createSetupWindow(): void {
     frame: false,
     resizable: false,
     autoHideMenuBar: true,
-    title: '康斯坦丁 配置',
+    title: 'Konstantion of League 配置',
     icon,
     backgroundColor: '#000000ff',
     webPreferences: {
@@ -110,7 +110,7 @@ function registerWindowIpc(): void {
 function createTray(): void {
   const trayIcon = nativeImage.createFromPath(trayIconPath)
   tray = new Tray(trayIcon)
-  tray.setToolTip('康斯坦丁')
+  tray.setToolTip('Konstantion of League')
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -326,7 +326,7 @@ async function boot(): Promise<void> {
 
   // 确保离线元数据可用，让 LCU 英雄表 / 皮肤列表后台就绪
   try {
-    await downloadLolSkinsMetadata(false)
+    await downloadLolSkinsMetadata()
   } catch (err) {
     console.warn('元数据初始化失败:', err)
   }
@@ -350,7 +350,8 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  // 与 electron-builder.yml 的 appId 保持一致，保证任务栏图标/通知归组正确
+  electronApp.setAppUserModelId('com.cslol.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
   // 第二次启动时恢复配置窗口，而不是创建新实例

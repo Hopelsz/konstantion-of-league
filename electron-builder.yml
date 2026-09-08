@@ -1,5 +1,5 @@
 appId: com.cslol.app
-productName: League Skins
+productName: Konstantion of League
 directories:
   buildResources: build
 files:
@@ -19,7 +19,7 @@ extraResources:
 asarUnpack:
   - resources/**
 win:
-  executableName: league-skins
+  executableName: konstantion-of-league
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

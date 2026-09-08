@@ -99,7 +99,7 @@ async function loadSkinData(): Promise<SkinRaw[]> {
     }
   }
 
-  // 优先读取用户数据目录中的元数据（可能是网络下载的最新版本）
+  // 优先读取用户数据目录中的本地副本（启动时由 downloadLolSkinsMetadata 指纹同步，与内置一致）
   const result = await tryLoad(LOL_SKINS_METADATA_LOCATION)
   if (result) return result
 
