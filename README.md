@@ -45,18 +45,22 @@ pnpm typecheck
 pnpm build:win
 ```
 
+> 皮肤元数据 `resources/skins_metadata.json`（约 6MB）**不在 Git 仓库中**（见 `.gitignore`），克隆后首次 `pnpm dev` / `pnpm build:win` 需联网，构建前置脚本会自动从 CommunityDragon 下载；此后即可离线构建。也可手动执行 `pnpm update:metadata` 获取最新版。
+
 > 开发调试小技巧：dev 模式下启动约 1 秒后会自动弹出一个悬浮窗用于预览布局，设置环境变量 `LEAGUE_SKINS_DEBUG_FLOAT=0` 可关闭。
 
 
 ## 更新内置皮肤元数据
 
-程序离线运行，识别新英雄/新皮肤靠打包在内的 `resources/skins_metadata.json`，它**不会**随英雄联盟版本自动更新。建议每逢游戏大版本更新跑一次：
+程序识别新英雄/新皮肤靠打包在内的 `resources/skins_metadata.json`，它**不会**随英雄联盟版本自动更新。建议每逢游戏大版本更新跑一次：
 
 ```bash
 pnpm update:metadata
 ```
 
-脚本会从 CommunityDragon（简体中文档位）下载最新 `skins.json`，校验结构无误后覆盖 `resources/skins_metadata.json`。随后随下一次打包发版；老用户升级新版本时，程序会通过内置文件指纹自动覆盖其本地旧副本，无需手动清理。
+脚本会从 CommunityDragon（简体中文档位）下载最新 `skins.json`，校验结构无误后覆盖 `resources/skins_metadata.json`。随后随下一次打包发版（`pnpm build` 前置的 `ensure:metadata` 仅在文件缺失时补下，不会自动刷新）。
+
+终端用户侧无需关心以上内容：应用配置窗口顶栏有「更新皮肤元数据」按钮，游戏出新版本后联网点一下即可，不必升级应用；程序通过对比游戏版本号判断是否已有新数据，已是最新时按钮不可点击。
 
 
 ## 免责声明

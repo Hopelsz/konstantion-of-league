@@ -6,3 +6,6 @@ out
 .eslintcache
 *.log*
 *.tsbuildinfo
+
+# 皮肤元数据（9MB+，由 pnpm update:metadata 在线生成，不进仓库；打包前须先下载）
+resources/skins_metadata.json

@@ -8,8 +8,8 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
 
 import { askAndSetLeaguePath, isCurrentLeaguePathValid, askAndSelectLocalSkins, getCurrentSkinId, getChampionSkinId, getCloseBehavior, setCloseBehavior, getFloatWindowEnabled, setFloatWindowEnabled, getMultiChampionSkinEnabled, setMultiChampionSkinEnabled, getFloatWindowPosition, setFloatWindowPosition, getLeaguePath, getConfigValue, type FloatWindowPosition } from './config'
-import { useLocalLolSkins, checkLolSkinsExist, getExistingSkins, invalidateExistingSkinsCache, getSkinsLocation } from './download'
-import { setSkin, disableSkin, clearAllSkins, getChampionSkinsDetail } from './skins'
+import { useLocalLolSkins, checkLolSkinsExist, getExistingSkins, invalidateExistingSkinsCache, getSkinsLocation, updateSkinsMetadataFromNetwork, getSkinsMetadataState } from './download'
+import { setSkin, disableSkin, clearAllSkins, getChampionSkinsDetail, invalidateChampionDirCache } from './skins'
 import { type Skin, type Chroma, listSkins, listChampions, invalidateMetadataCache } from './metadata'
 import { invalidateChampionMap } from './lcu'
 
@@ -57,6 +57,17 @@ ipcMain.handle('useLocalLolSkins', async (_, localPath: string) => {
   invalidateExistingSkinsCache()
   invalidateChampionMap()
 })
+// 在线更新皮肤元数据：新英雄/新皮肤上线后无需升级应用即可识别
+ipcMain.handle('updateSkinsMetadata', async (): Promise<number> => {
+  const count = await updateSkinsMetadataFromNetwork()
+  invalidateMetadataCache() // 双保险：函数内部已清一次，这里连同其余缓存一并清理
+  invalidateExistingSkinsCache()
+  invalidateChampionMap()
+  invalidateChampionDirCache()
+  return count
+})
+// 查询元数据版本状态：前端据此决定更新按钮是否可用
+ipcMain.handle('getSkinsMetadataState', () => getSkinsMetadataState())
 ipcMain.handle('checkLolSkinsExist', checkLolSkinsExist)
 ipcMain.handle('listSkins', listSkins)
 ipcMain.handle('getExistingSkins', getExistingSkins)

@@ -35,6 +35,16 @@ export type CloseBehavior = 'ask' | 'tray' | 'quit'
 
 export type FloatWindowPosition = 'right' | 'left' | 'top' | 'bottom'
 
+/** 皮肤元数据版本状态 */
+export interface SkinsMetadataState {
+  /** 本地元数据是否已对齐当前线上游戏版本 */
+  upToDate: boolean
+  /** 当前线上最新游戏版本（获取失败为 null） */
+  latestPatch: string | null
+  /** 本地元数据对应的游戏版本（从未在线更新过为 null） */
+  metadataPatch: string | null
+}
+
 export interface ConfigPaths {
   leaguePath: string
   skinsPath: string
@@ -51,6 +61,8 @@ export interface Api {
   askAndSetLeaguePath: () => Promise<boolean | null>
   askAndSelectLocalSkins: () => Promise<string | null>
   useLocalLolSkins: (localPath: string) => Promise<void>
+  updateSkinsMetadata: () => Promise<number>
+  getSkinsMetadataState: () => Promise<SkinsMetadataState>
   checkLolSkinsExist: () => Promise<boolean>
   listSkins: () => Promise<Skin[]>
   getExistingSkins: () => Promise<Skin[]>

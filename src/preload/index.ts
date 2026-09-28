@@ -14,6 +14,9 @@ const api = {
     ipcRenderer.invoke('askAndSelectLocalSkins'),
   useLocalLolSkins: (localPath: string): Promise<void> =>
     ipcRenderer.invoke('useLocalLolSkins', localPath),
+  updateSkinsMetadata: (): Promise<number> => ipcRenderer.invoke('updateSkinsMetadata'),
+  getSkinsMetadataState: (): Promise<{ upToDate: boolean; latestPatch: string | null; metadataPatch: string | null }> =>
+    ipcRenderer.invoke('getSkinsMetadataState'),
   checkLolSkinsExist: (): Promise<boolean> => ipcRenderer.invoke('checkLolSkinsExist'),
   listSkins: (): Promise<Skin[]> => ipcRenderer.invoke('listSkins'),
   getExistingSkins: (): Promise<Skin[]> => ipcRenderer.invoke('getExistingSkins'),

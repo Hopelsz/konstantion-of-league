@@ -19,13 +19,21 @@ import {
 } from './constants'
 import type { Skin, Chroma } from './metadata'
 import { listChampions, listSkins as listAllSkins, normalizeName } from './metadata'
-import { getLeaguePath, setCurrentSkinId, getCurrentSkinId, setChampionSkinId, removeChampionSkinId, getChampionSkins, clearAllChampionSkins, getMultiChampionSkinEnabled } from './config'
+import { getLeaguePath, setCurrentSkinId, getCurrentSkinId, setChampionSkinId, removeChampionSkinId, getChampionSkins, clearAllChampionSkins, getMultiChampionSkinEnabled, isLeaguePathValid } from './config'
 import { getSkinsLocation } from './download'
 
 let runningProcess: ChildProcess | null = null
 
 // Cache champion titles → champion data to avoid repeated calls
 let championDirCache: Map<string, string[]> | null = null
+
+/**
+ * 清除英雄目录名缓存。元数据更新（如在线更新拉到新英雄）后调用，
+ * 否则新英雄的目录映射不生效，setSkin 会找不到皮肤文件。
+ */
+export function invalidateChampionDirCache(): void {
+  championDirCache = null
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -305,6 +313,21 @@ async function findSkinFile(
 }
 
 /**
+ * 解析皮肤/炫彩对应的 .fantome/.zip 文件路径（setSkin 与启动恢复共用）。
+ * 炫彩优先按 ID 找（文件名为 {id}.fantome），再回退按名字找旧结构；
+ * EXTRA 皮肤（负 id，非炫彩）必须命中与名字对应的专属文件，不允许反向模糊回退。
+ * @returns 完整文件路径，找不到返回 null。
+ */
+async function resolveSkinFilePath(skin: Skin | Chroma): Promise<string | null> {
+  const chroma = isChroma(skin)
+  if (chroma) {
+    const byId = await findChromaFileById(skin.championName, skin.id)
+    if (byId) return byId
+  }
+  return findSkinFile(skin.championName, skin.name, chroma, !chroma && skin.id < 0)
+}
+
+/**
  * This function sets the skin of a champion in league of legends.
  * Multiple champion skins can coexist — each champion gets its own mod directory.
  * @param skin the skin or chroma to set.
@@ -313,29 +336,14 @@ async function findSkinFile(
 export async function setSkin(skin: Skin | Chroma): Promise<void> {
   const skinsDirDestination = path.join(TEMP_DIR, 'skins')
   const overlayDirDestination = path.join(TEMP_DIR, 'overlay')
-  
+
   if (!skin.championName) {
     throw new Error(`Skin/Chroma does not have championName: ${JSON.stringify(skin)}`)
   }
 
   const chroma = isChroma(skin)
-  
-  // For chromas, search by ID first (chroma files are named {id}.fantome),
-  // then fall back to name-based search for legacy structures.
-  let skinPath: string | null = null
-  if (chroma) {
-    skinPath = await findChromaFileById(skin.championName, skin.id)
-  }
-  if (!skinPath) {
-    // EXTRA 皮肤（负 id，非炫彩）必须命中与名字对应的专属文件，不允许反向模糊回退到别的文件
-    skinPath = await findSkinFile(
-      skin.championName,
-      skin.name,
-      chroma,
-      !chroma && skin.id < 0
-    )
-  }
-  
+
+  const skinPath = await resolveSkinFilePath(skin)
   if (!skinPath) {
     const identifier = chroma ? `chroma id=${skin.id} name="${skin.name}"` : skin.name
     throw new Error(`Skin file not found for: ${identifier} in champion: ${skin.championName}`)
@@ -453,6 +461,141 @@ export async function disableSkin(championId?: number): Promise<void> {
   }
 }
 
+/**
+ * 清理上一会话残留的 mod-tools 进程（孤儿 runoverlay）。
+ * Windows 下父进程退出不会自动终止子进程，残留进程会占用 TEMP_DIR 中的
+ * WAD 文件导致本会话重建 mod/overlay 时报 EBUSY。仅在当前会话未启动过
+ * overlay 时执行（避免误杀本会话进程）；无残留时 taskkill 报错直接忽略。
+ */
+async function killOrphanOverlay(): Promise<void> {
+  if (runningProcess !== null) return
+  if (process.platform !== 'win32') return
+  try {
+    await promisifiedExec('taskkill /IM mod-tools.exe /F')
+    console.log('[restore] 已清理上一会话残留的 mod-tools 进程')
+  } catch {
+    // 无残留进程（taskkill 找不到目标时非 0 退出），忽略
+  }
+}
+
+/**
+ * 收集配置中记住的皮肤/炫彩对象。
+ * 多英雄模式：championSkins 中的每一项；单英雄模式：全局 currentSkinId。
+ * 按完整字符串 `${championId}-${skinId}` 匹配（EXTRA 皮肤 id 为负数，如 "103--86"）。
+ */
+async function collectRememberedSkins(): Promise<Array<Skin | Chroma>> {
+  const multiEnabled = await getMultiChampionSkinEnabled()
+  const allSkins = await listAllSkins()
+  const targets: Array<Skin | Chroma> = []
+
+  const matchById = (championId: number, skinId: string): Skin | Chroma | null => {
+    const skin = allSkins.find((s) => `${s.championId}-${s.id}` === skinId)
+    if (skin) return skin
+    const parent = allSkins.find(
+      (s) => s.championId === championId && s.chromas?.some((c) => `${c.championId}-${c.id}` === skinId)
+    )
+    return parent?.chromas?.find((c) => `${c.championId}-${c.id}` === skinId) ?? null
+  }
+
+  const championSkins = await getChampionSkins()
+  for (const [championIdStr, skinId] of Object.entries(championSkins)) {
+    const matched = matchById(parseInt(championIdStr, 10), skinId)
+    if (matched) targets.push(matched)
+  }
+  if (targets.length > 0) return targets
+
+  // 单英雄模式（championSkins 为空）：回退到全局 currentSkinId
+  if (!multiEnabled) {
+    const currentSkinId = await getCurrentSkinId()
+    if (currentSkinId) {
+      const dashIdx = currentSkinId.indexOf('-')
+      if (dashIdx > 0) {
+        const matched = matchById(parseInt(currentSkinId.slice(0, dashIdx), 10), currentSkinId)
+        if (matched) targets.push(matched)
+      }
+    }
+  }
+  return targets
+}
+
+/**
+ * 启动恢复：overlay 进程随应用退出而消亡，但配置中仍记着各英雄的皮肤，
+ * 悬浮窗会显示"已应用"角标而游戏内实际未生效。此函数在启动时按记忆重建
+ * mod 与 overlay，使"记住的皮肤"重新真正生效。
+ * 皮肤文件已不存在的记忆项会被清除（含其 mod 目录），避免悬浮窗显示与实际不符。
+ */
+export async function restoreSkinsOnStartup(): Promise<void> {
+  const gamePath = await getLeaguePath()
+  if (!gamePath || !(await isLeaguePathValid(gamePath))) return
+
+  const targets = await collectRememberedSkins()
+  if (targets.length === 0) return
+
+  console.log(`[restore] 启动恢复 ${targets.length} 个记忆皮肤…`)
+  const gameDir = path.join(gamePath, 'Game')
+  const multiEnabled = await getMultiChampionSkinEnabled()
+
+  await killOrphanOverlay()
+  await stopOverlay()
+
+  if (!multiEnabled) {
+    // 单英雄模式：直接复用 setSkin 完整流程
+    try {
+      await setSkin(targets[0])
+      console.log(`[restore] 单英雄模式恢复完成: ${targets[0].name}`)
+    } catch (err) {
+      console.warn('[restore] 单英雄模式恢复失败，清除记忆:', err)
+      await setCurrentSkinId('').catch(() => {})
+    }
+    return
+  }
+
+  // 多英雄模式：逐个重建 mod（文件缺失的项清除记忆），最后一次性打包 overlay
+  const skinsDirDestination = path.join(TEMP_DIR, 'skins')
+  const overlayDirDestination = path.join(TEMP_DIR, 'overlay')
+  await fs.ensureDir(skinsDirDestination)
+  // 清理单英雄模式遗留的 mod 目录，避免 mkoverlay 打包时同名 WAD 冲突
+  await fs.remove(path.join(skinsDirDestination, 'skin'))
+
+  let restored = 0
+  for (const target of targets) {
+    const modDir = path.join(skinsDirDestination, `champion_${target.championId}`)
+    const skinPath = await resolveSkinFilePath(target)
+    if (!skinPath) {
+      console.warn(`[restore] 皮肤文件缺失，清除该记忆: ${target.championName} / ${target.name}`)
+      await removeChampionSkinId(target.championId).catch(() => {})
+      await removeWithRetry(modDir).catch(() => {})
+      continue
+    }
+    try {
+      await removeWithRetry(modDir)
+      await runTool(
+        `${CSLOL_MANAGER_EXECUTABLE} import "${skinPath}" "${modDir}" --game:"${gameDir}"`,
+      )
+      restored++
+    } catch (err) {
+      console.warn(`[restore] 导入失败（清除该记忆）: ${target.championName} / ${target.name}`, err)
+      await removeChampionSkinId(target.championId).catch(() => {})
+      await removeWithRetry(modDir).catch(() => {})
+    }
+  }
+  if (restored === 0) return
+
+  const entries = await fs.readdir(skinsDirDestination, { withFileTypes: true })
+  const modNames = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+  if (modNames.length === 0) return
+
+  const modsArg = modNames.join('/')
+  await runTool(
+    `${CSLOL_MANAGER_EXECUTABLE} mkoverlay "${skinsDirDestination}" "${overlayDirDestination}" --game:"${gameDir}" --mods:"${modsArg}"`,
+  )
+  runningProcess = spawn(
+    CSLOL_MANAGER_EXECUTABLE,
+    ['runoverlay', overlayDirDestination, CSLOL_MANAGER_CONFIG, `--game:${gameDir}`]
+  )
+  console.log(`[restore] 多英雄模式恢复完成（${restored}/${targets.length} 个）`)
+}
+
 export interface ChampionSkinEntry {
   championId: number
   championName: string
@@ -503,7 +646,8 @@ export async function getChampionSkinsDetail(): Promise<ChampionSkinEntry[]> {
     if (!multiEnabled) {
       const currentSkinId = await getCurrentSkinId()
       if (currentSkinId) {
-        const match = currentSkinId.match(/^(\d+)-(\d+)$/)
+        // 注意 id 可能为负（EXTRA 皮肤，如 "103--86"），用 -? 兼容
+        const match = currentSkinId.match(/^(\d+)-(-?\d+)$/)
         if (match) {
           const championId = parseInt(match[1], 10)
           const skinIdNum = parseInt(match[2], 10)

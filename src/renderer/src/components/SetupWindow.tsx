@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useAlert } from '@renderer/hooks/Alert'
-import { FloatWindowPosition } from '../types'
+import { FloatWindowPosition, SkinsMetadataState } from '../types'
 
 type ConfigPaths = Awaited<ReturnType<typeof window.api.getConfigPaths>>
 
 /** 按钮/忙碌状态：空串表示空闲 */
-type Busy = '' | 'game' | 'skins'
+type Busy = '' | 'game' | 'skins' | 'metadata'
 
 const gold = '#c8aa6e'
 
@@ -21,16 +21,35 @@ function SetupWindow(): JSX.Element {
   const [floatPosition, setFloatPosition] = useState<FloatWindowPosition>('right')
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null)
   const msgTimer = useRef<number | null>(null)
+  // 皮肤元数据版本状态（null = 尚未加载完成）
+  const [metaState, setMetaState] = useState<SkinsMetadataState | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     const cfg = await window.api.getConfigPaths()
     setConfig(cfg)
   }, [])
 
+  /** 查询元数据版本状态：决定顶部更新按钮的可用性 */
+  const refreshMetaState = useCallback(async (): Promise<void> => {
+    try {
+      setMetaState(await window.api.getSkinsMetadataState())
+    } catch {
+      setMetaState(null) // 查询失败保持可点，允许用户手动重试
+    }
+  }, [])
+
   useEffect(() => {
     if (!hasApi) return // 浏览器预览模式（无 preload）只展示静态界面
     refresh().catch(() => setAlert('读取配置失败，请重试', 'error'))
-  }, [refresh, setAlert, hasApi])
+    void refreshMetaState()
+  }, [refresh, setAlert, hasApi, refreshMetaState])
+
+  // 定时刷新版本状态（与主进程缓存 TTL 一致）：窗口常驻期间新版本上线也能提示
+  useEffect(() => {
+    if (!hasApi) return
+    const timer = window.setInterval(() => void refreshMetaState(), 10 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [hasApi, refreshMetaState])
 
   // 卸载时清理设置面板的提示定时器
   useEffect(() => {
@@ -122,6 +141,23 @@ function SetupWindow(): JSX.Element {
     }
   }
 
+  /** 在线更新皮肤元数据：新英雄/新皮肤上线后，无需升级应用即可识别 */
+  const handleUpdateMetadata = async (): Promise<void> => {
+    if (!hasApi || busy === 'metadata') return
+    // 已对齐线上版本时禁止点击：避免换肤失败的用户乱点导致无意义请求
+    if (metaState?.upToDate) return
+    setBusy('metadata')
+    try {
+      const count = await window.api.updateSkinsMetadata()
+      setAlert(`皮肤数据已更新（共 ${count} 个皮肤），新皮肤即刻可用`)
+    } catch (error) {
+      setAlert(error instanceof Error ? `更新失败：${error.message}` : '更新失败，请检查网络', 'error')
+    } finally {
+      setBusy('')
+      void refreshMetaState()
+    }
+  }
+
   const hideToTray = (): void => {
     window.api?.hideWindow()
   }
@@ -204,6 +240,63 @@ function SetupWindow(): JSX.Element {
           className="window-no-drag"
           style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', height: '100%' }}
         >
+          {/* 皮肤数据更新按钮：仅当本地元数据落后于线上版本时可点 */}
+          <button
+            onClick={handleUpdateMetadata}
+            disabled={busy === 'metadata' || metaState?.upToDate === true}
+            title={
+              busy === 'metadata'
+                ? '正在更新皮肤元数据…'
+                : metaState === null
+                  ? '正在检查皮肤元数据版本…'
+                  : metaState.upToDate
+                    ? `皮肤元数据已是最新（版本 ${metaState.latestPatch}）`
+                    : metaState.latestPatch
+                      ? `检测到新版本 ${metaState.latestPatch}，点击更新皮肤元数据`
+                      : '无法获取游戏版本，点击重试'
+            }
+            style={{
+              ...btnSquareStyle,
+              position: 'relative',
+              opacity: metaState?.upToDate ? 0.4 : 1,
+              cursor: busy === 'metadata' || metaState?.upToDate ? 'default' : 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              if (busy !== 'metadata' && metaState?.upToDate !== true) e.currentTarget.style.background = '#394c74ff'
+            }}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              style={{
+                shapeRendering: 'geometricPrecision',
+                animation: busy === 'metadata' ? 'spin 1s linear infinite' : undefined,
+                color: metaState?.upToDate ? '#a09b8c' : '#f0e6d2'
+              }}
+            >
+              <path
+                fill="currentColor"
+                d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+              />
+            </svg>
+            {/* 有更新时的金色圆点提示 */}
+            {metaState && !metaState.upToDate && busy !== 'metadata' && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '9px',
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: '#c8aa6e',
+                  boxShadow: '0 0 4px #c8aa6e'
+                }}
+              />
+            )}
+          </button>
           <button
             onClick={toggleSettings}
             title="设置"

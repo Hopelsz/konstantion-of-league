@@ -15,6 +15,7 @@ import { type Champion, listChampions } from './metadata'
 import { getFloatWindowPosition, isCurrentLeaguePathValid } from './config'
 import { checkLolSkinsExist, downloadLolSkinsMetadata } from './download'
 import { setLcuHandlers, startLcuMonitor, stopLcuMonitor } from './lcu'
+import { restoreSkinsOnStartup } from './skins'
 
 import icon from '../../resources/icon.png?asset'
 import trayIconPath from '../../build/icon.ico?asset'
@@ -330,6 +331,13 @@ async function boot(): Promise<void> {
   } catch (err) {
     console.warn('元数据初始化失败:', err)
   }
+
+  // 启动恢复记忆皮肤：上一会话的 overlay 随进程退出消亡，但配置仍记着
+  // 各英雄的皮肤（悬浮窗会显示"已应用"角标），这里重建 mod/overlay 使其
+  // 真正生效；文件已丢失的记忆项会被清除。失败不阻塞启动。
+  void restoreSkinsOnStartup().catch((err) => {
+    console.warn('启动恢复皮肤失败:', err)
+  })
 
   // 常驻后台监控游戏
   startLcuMonitor()

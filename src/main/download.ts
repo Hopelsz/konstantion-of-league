@@ -38,18 +38,26 @@ export function invalidateExistingSkinsCache(): void {
 }
 
 /**
- * 指纹同步：确保 userData 本地副本与内置文件内容一致。
- * 单机化设计：打包的 resources/skins_metadata.json 是权威数据源——应用升级后内置文件更新，
- * 与旧副本指纹不一致时覆盖之；一致（含首次缺失）则按需复制/跳过，保证老副本不"过期"。
+ * 指纹同步：确保 userData 本地副本不落后于内置文件。
+ * 单机化设计：打包的 resources/skins_metadata.json 是离线兜底数据源——应用升级后内置文件更新，
+ * 本地副本缺失或明显更旧（条目更少）时覆盖之；本地副本更新（如用户在线更新过）则保留，
+ * 避免启动同步把在线拉到的新数据回滚成旧内置数据。
  */
 export async function downloadLolSkinsMetadata(): Promise<void> {
   if (!(await locationExists(LOL_SKINS_METADATA_FALLBACK))) return
   try {
-    if (!(await isLocalMetadataInSync())) {
-      await fs.copyFile(LOL_SKINS_METADATA_FALLBACK, LOL_SKINS_METADATA_LOCATION)
-      invalidateMetadataCache() // 副本被替换，清掉可能已解析缓存的旧元数据
-      console.log('内置元数据有更新，已同步到本地副本')
+    if (await isLocalMetadataInSync()) return
+    const localCount = await countMetadataEntries(LOL_SKINS_METADATA_LOCATION)
+    if (localCount >= 0) {
+      // 本地副本存在但与内置不一致：仅当内置条目更多（应用升级带来新数据）时才覆盖
+      const bundledCount = await countMetadataEntries(LOL_SKINS_METADATA_FALLBACK)
+      if (bundledCount >= 0 && bundledCount <= localCount) return
     }
+    await fs.copyFile(LOL_SKINS_METADATA_FALLBACK, LOL_SKINS_METADATA_LOCATION)
+    invalidateMetadataCache() // 副本被替换，清掉可能已解析缓存的旧元数据
+    // 内置文件与在线数据无版本对应关系，清空版本标记（视为未知，允许用户点更新）
+    await setConfigValue('skinsMetadataPatch', '')
+    console.log('内置元数据有更新，已同步到本地副本')
   } catch (copyErr) {
     console.warn('同步内置元数据失败:', copyErr)
   }
@@ -76,6 +84,133 @@ async function isLocalMetadataInSync(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * 读取元数据文件的皮肤条目数。读取/解析失败返回 -1（视为缺失或损坏）。
+ */
+async function countMetadataEntries(file: string): Promise<number> {
+  try {
+    const content = await fs.readFile(file, 'utf-8')
+    const data = JSON.parse(content)
+    return Object.keys(data ?? {}).length
+  } catch {
+    return -1
+  }
+}
+
+/** 在线元数据数据源（与 scripts/update-metadata.mjs 保持一致） */
+const METADATA_SOURCE_URL =
+  'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/v1/skins.json'
+
+/** 游戏版本列表（第一个元素即当前线上最新版本，如 "16.19.1"） */
+const GAME_VERSIONS_URL = 'https://ddragon.leagueoflegends.com/api/versions.json'
+
+// 最新版本号内存缓存（10 分钟）：避免频繁打开配置窗口时反复请求
+let cachedLatestPatch: string | null = null
+let cachedLatestPatchAt = 0
+const LATEST_PATCH_CACHE_MS = 10 * 60 * 1000
+
+/**
+ * 获取当前线上最新游戏版本号。
+ * 获取失败（离线等）返回 null 或最近一次成功缓存值。
+ */
+async function fetchLatestPatch(): Promise<string | null> {
+  if (cachedLatestPatch && Date.now() - cachedLatestPatchAt < LATEST_PATCH_CACHE_MS) {
+    return cachedLatestPatch
+  }
+  try {
+    const response = await fetch(GAME_VERSIONS_URL, { signal: AbortSignal.timeout(8_000) })
+    if (response.ok) {
+      const versions = (await response.json()) as string[]
+      if (Array.isArray(versions) && typeof versions[0] === 'string') {
+        cachedLatestPatch = versions[0]
+        cachedLatestPatchAt = Date.now()
+      }
+    }
+  } catch {
+    // 网络失败：回退到旧缓存（可能为 null）
+  }
+  return cachedLatestPatch
+}
+
+/** 皮肤元数据版本状态，供前端决定更新按钮的可用性 */
+export interface SkinsMetadataState {
+  /** 本地元数据是否已对齐当前线上游戏版本 */
+  upToDate: boolean
+  /** 当前线上最新游戏版本（获取失败为 null） */
+  latestPatch: string | null
+  /** 本地元数据对应的游戏版本（从未在线更新过为 null） */
+  metadataPatch: string | null
+}
+
+/**
+ * 查询本地元数据版本状态：对比「在线更新时记录的游戏版本标记」与线上最新版本。
+ * 标记为空/未知（如刚被内置文件覆盖）视为未对齐，允许用户点更新。
+ */
+export async function getSkinsMetadataState(): Promise<SkinsMetadataState> {
+  const marker = await getConfigValue('skinsMetadataPatch')
+  const metadataPatch = typeof marker === 'string' && marker ? marker : null
+  const latestPatch = await fetchLatestPatch()
+  return {
+    upToDate: !!latestPatch && metadataPatch === latestPatch,
+    latestPatch,
+    metadataPatch
+  }
+}
+
+/**
+ * 结构与运行时消费字段的最小校验：顶层为 {皮肤id: {id, name, splashPath, ...}}。
+ * @returns 校验通过时的皮肤条目数
+ */
+function assertPlausibleMetadata(text: string): number {
+  const data = JSON.parse(text)
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('数据源顶层结构异常，疑似返回了错误页面')
+  }
+  const entries = Object.values(data as Record<string, unknown>)
+  if (entries.length === 0) throw new Error('数据源为空')
+  const first = entries[0] as { id?: unknown; name?: unknown; splashPath?: unknown }
+  if (
+    typeof first?.id !== 'number' ||
+    typeof first?.name !== 'string' ||
+    typeof first?.splashPath !== 'string'
+  ) {
+    throw new Error('数据源条目缺少 id/name/splashPath 字段，疑似结构变化')
+  }
+  return entries.length
+}
+
+/**
+ * 在线更新皮肤元数据：从 CommunityDragon 拉取最新中文皮肤列表，写入本地副本。
+ * 新英雄/新皮肤上线后，用户无需升级应用即可在悬浮窗中看到并使用对应皮肤。
+ * @returns 更新后的皮肤条目数
+ */
+export async function updateSkinsMetadataFromNetwork(): Promise<number> {
+  const response = await fetch(METADATA_SOURCE_URL, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20_000)
+  })
+  if (!response.ok) {
+    throw new Error(`下载失败: HTTP ${response.status} ${response.statusText}`)
+  }
+  const text = await response.text()
+  const newCount = assertPlausibleMetadata(text)
+
+  // 防御：远端条目明显少于本地时视为异常数据，取消更新（本地文件不动）
+  const localCount = await countMetadataEntries(LOL_SKINS_METADATA_LOCATION)
+  if (localCount >= 0 && newCount < localCount) {
+    throw new Error(`远端数据异常（${localCount} → ${newCount} 条），已取消更新`)
+  }
+
+  await fs.writeFile(LOL_SKINS_METADATA_LOCATION, text, 'utf-8')
+  invalidateMetadataCache()
+  invalidateExistingSkinsCache()
+  // 记录当前最新游戏版本作为元数据版本标记，供更新按钮判断是否已对齐
+  const latestPatch = await fetchLatestPatch()
+  if (latestPatch) await setConfigValue('skinsMetadataPatch', latestPatch)
+  console.log(`[metadata] 在线更新完成，共 ${newCount} 个皮肤条目`)
+  return newCount
 }
 
 /**
