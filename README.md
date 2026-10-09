@@ -54,8 +54,8 @@
 环境要求：Node.js、[pnpm](https://pnpm.io)（仓库已锁定 `pnpm@10`）
 
 ```bash
-git clone https://github.com/Hopelsz/league-skins-tool.git
-cd league-skins-tool
+git clone https://github.com/Hopelsz/konstantion-of-league.git
+cd konstantion-of-league
 
 # 安装依赖
 pnpm install

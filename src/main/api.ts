@@ -7,7 +7,7 @@
 
 import { ipcMain, BrowserWindow, app } from 'electron'
 
-import { askAndSetLeaguePath, isCurrentLeaguePathValid, askAndSelectLocalSkins, getCurrentSkinId, getChampionSkinId, getCloseBehavior, setCloseBehavior, getFloatWindowEnabled, setFloatWindowEnabled, getMultiChampionSkinEnabled, setMultiChampionSkinEnabled, getFloatWindowPosition, setFloatWindowPosition, getFloatWindowAlwaysOnTop, setFloatWindowAlwaysOnTop, getLeaguePath, getConfigValue, type FloatWindowPosition } from './config'
+import { askAndSetLeaguePath, isCurrentLeaguePathValid, askAndSelectLocalSkins, getCurrentSkinId, getChampionSkinId, getFloatWindowEnabled, setFloatWindowEnabled, getMultiChampionSkinEnabled, setMultiChampionSkinEnabled, getFloatWindowPosition, setFloatWindowPosition, getFloatWindowAlwaysOnTop, setFloatWindowAlwaysOnTop, getLeaguePath, getConfigValue, type FloatWindowPosition } from './config'
 import { useLocalLolSkins, checkLolSkinsExist, getExistingSkins, invalidateExistingSkinsCache, getSkinsLocation, updateSkinsMetadataFromNetwork, getSkinsMetadataState } from './download'
 import { setSkin, disableSkin, clearAllSkins, getChampionSkinsDetail, invalidateChampionDirCache } from './skins'
 import { type Skin, type Chroma, listSkins, listChampions, invalidateMetadataCache } from './metadata'
@@ -90,8 +90,6 @@ ipcMain.handle('clearAllSkins', () => clearAllSkins())
 ipcMain.handle('getChampionSkinsDetail', () => getChampionSkinsDetail())
 ipcMain.handle('getCurrentSkinId', getCurrentSkinId)
 ipcMain.handle('getChampionSkinId', (_, championId: number) => getChampionSkinId(championId))
-ipcMain.handle('getCloseBehavior', getCloseBehavior)
-ipcMain.handle('setCloseBehavior', (_, behavior) => setCloseBehavior(behavior))
 ipcMain.handle('getFloatWindowEnabled', getFloatWindowEnabled)
 ipcMain.handle('setFloatWindowEnabled', (_, enabled: boolean) => setFloatWindowEnabled(enabled))
 ipcMain.handle('getFloatWindowPosition', getFloatWindowPosition)

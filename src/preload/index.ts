@@ -31,8 +31,6 @@ const api = {
   getCurrentSkinId: (): Promise<string | null> => ipcRenderer.invoke('getCurrentSkinId'),
   getChampionSkinId: (championId: number): Promise<string | null> =>
     ipcRenderer.invoke('getChampionSkinId', championId),
-  getCloseBehavior: (): Promise<string> => ipcRenderer.invoke('getCloseBehavior'),
-  setCloseBehavior: (behavior: string): Promise<void> => ipcRenderer.invoke('setCloseBehavior', behavior),
   getFloatWindowEnabled: (): Promise<boolean> => ipcRenderer.invoke('getFloatWindowEnabled'),
   setFloatWindowEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('setFloatWindowEnabled', enabled),
   getFloatWindowPosition: (): Promise<FloatWindowPosition> => ipcRenderer.invoke('getFloatWindowPosition'),
@@ -45,16 +43,9 @@ const api = {
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('getAppVersion'),
   // Window controls
   minimizeWindow: (): void => ipcRenderer.send('window-minimize'),
-  maximizeWindow: (): void => ipcRenderer.send('window-maximize'),
   closeWindow: (): void => ipcRenderer.send('window-close'),
   hideWindow: (): void => ipcRenderer.send('window-hide'),
   quitApp: (): void => ipcRenderer.send('app-quit'),
-  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window-is-maximized'),
-  onWindowMaximized: (callback: (maximized: boolean) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized)
-    ipcRenderer.on('window-maximized', handler)
-    return () => ipcRenderer.removeListener('window-maximized', handler)
-  },
   // 浮动窗口
   showFloatWindow: (champion: Champion): void => ipcRenderer.send('show-float-window', champion),
   hideFloatWindow: (): void => ipcRenderer.send('hide-float-window'),
@@ -79,17 +70,6 @@ const api = {
     const handler = (_: Electron.IpcRendererEvent, championId: number, skinId: string | null) => callback(championId, skinId)
     ipcRenderer.on('skin-state-changed', handler)
     return () => ipcRenderer.removeListener('skin-state-changed', handler)
-  },
-  // LCU 通信事件
-  onLcuChampionSelected: (callback: (champion: Champion) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, champion: Champion) => callback(champion)
-    ipcRenderer.on('lcu-champion-selected', handler)
-    return () => ipcRenderer.removeListener('lcu-champion-selected', handler)
-  },
-  onLcuChampSelectEnded: (callback: () => void): (() => void) => {
-    const handler = () => callback()
-    ipcRenderer.on('lcu-champ-select-ended', handler)
-    return () => ipcRenderer.removeListener('lcu-champ-select-ended', handler)
   }
 }
 

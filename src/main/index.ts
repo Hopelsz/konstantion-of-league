@@ -119,7 +119,6 @@ function registerWindowIpc(): void {
   ipcMain.on('window-minimize', () => setupWindow?.minimize())
   ipcMain.on('window-close', () => setupWindow?.close())
   ipcMain.on('window-hide', () => setupWindow?.hide())
-  ipcMain.handle('window-is-maximized', () => setupWindow?.isMaximized() ?? false)
 
   // 渲染进程确认退出时调用
   ipcMain.on('app-quit', () => {

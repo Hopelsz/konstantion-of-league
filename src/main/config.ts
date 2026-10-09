@@ -249,18 +249,6 @@ export async function clearAllChampionSkins(): Promise<void> {
   await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2))
 }
 
-export type CloseBehavior = 'ask' | 'tray' | 'quit'
-
-export async function getCloseBehavior(): Promise<CloseBehavior> {
-  const val = await getConfigValue('closeBehavior')
-  if (val === 'tray' || val === 'quit') return val
-  return 'ask'
-}
-
-export async function setCloseBehavior(behavior: CloseBehavior): Promise<void> {
-  await setConfigValue('closeBehavior', behavior)
-}
-
 export async function getFloatWindowEnabled(): Promise<boolean> {
   const val = await getConfigValue('floatWindowEnabled')
   // 默认开启

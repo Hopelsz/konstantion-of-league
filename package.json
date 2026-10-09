@@ -1,6 +1,6 @@
 {
   "name": "konstantion-of-league",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Konstantion of League",
   "main": "./out/main/index.js",
   "author": "hope",
@@ -16,7 +16,6 @@
     "start": "electron-vite preview",
     "dev": "cmd /c chcp 65001 >NUL && electron-vite dev",
     "build": "npm run ensure:metadata && npm run typecheck && electron-vite build",
-    "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
