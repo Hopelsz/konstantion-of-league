@@ -219,7 +219,11 @@ export async function updateSkinsMetadataFromNetwork(): Promise<number> {
  */
 export async function getSkinsLocation(): Promise<string> {
   const customPath = await getConfigValue('skinsPath')
-  return typeof customPath === 'string' && customPath ? customPath : LOL_SKINS_LOCATION
+  const base = typeof customPath === 'string' && customPath ? customPath : LOL_SKINS_LOCATION
+  // LeagueSkins 仓库：用户常直接选中仓库根目录，皮肤实际在 <root>/skins 下
+  const nested = path.join(base, 'skins')
+  if (!(await hasSkinFiles(base)) && (await hasSkinFiles(nested))) return nested
+  return base
 }
 
 /**
@@ -243,7 +247,23 @@ export async function checkLolSkinsExist(): Promise<boolean> {
 }
 
 /**
- * 轻量结构校验：目录存在且至少含一个符合 LOL-SKINS 结构的皮肤文件。
+ * 英雄目录内是否含皮肤文件：直接含 .fantome/.zip，
+ * 或 LeagueSkins 的多一层结构 <皮肤id>/<皮肤id>.fantome|.zip。
+ */
+async function dirHasSkinFiles(dir: string): Promise<boolean> {
+  const files = await fs.readdir(dir).catch(() => [])
+  if (files.some((f) => /\.(fantome|zip)$/i.test(f))) return true
+  for (const name of files) {
+    if (!/^\d+$/.test(name)) continue
+    for (const ext of ['.fantome', '.zip']) {
+      if (await locationExists(path.join(dir, name, `${name}${ext}`))) return true
+    }
+  }
+  return false
+}
+
+/**
+ * 轻量结构校验：目录存在且至少含一个符合 LOL-SKINS / LeagueSkins 结构的皮肤文件。
  * 标准结构：<skins>/<英雄目录>/<皮肤文件(.fantome/.zip)>，或顶层平铺的 .fantome 文件。
  * 注意：顶层 .zip 不算数——普通文件夹也常含任意压缩包，仅凭 zip 会把"选错的文件夹"误判为有效。
  */
@@ -252,9 +272,8 @@ async function hasSkinFiles(skinsPath: string): Promise<boolean> {
     if (!(await locationExists(skinsPath))) return false
     const entries = await fs.readdir(skinsPath, { withFileTypes: true })
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const files = await fs.readdir(path.join(skinsPath, entry.name))
-        if (files.some((f) => /\.(fantome|zip)$/i.test(f))) return true
+      if (entry.isDirectory() && (await dirHasSkinFiles(path.join(skinsPath, entry.name)))) {
+        return true
       }
       // 顶层平铺的 .fantome（LOL-SKINS 专用格式，普通文件夹中不会出现）
       if (entry.isFile() && /\.fantome$/i.test(entry.name)) return true
@@ -273,11 +292,13 @@ async function validateSkinsPath(skinsPath: string): Promise<boolean> {
   try {
     if (!(await hasSkinFiles(skinsPath))) return false
 
-    // 元数据就绪时用英雄名校验目录名；未就绪/离线时降级为纯结构校验
+    // 元数据就绪时用英雄名校验目录名（LeagueSkins 用英雄数字 id）；未就绪/离线时降级为纯结构校验
     const championNames = new Set<string>()
+    const championIds = new Set<string>()
     try {
       for (const c of await listChampions()) {
         championNames.add(c.name)
+        championIds.add(String(c.id))
         for (const alias of c.aliases ?? []) championNames.add(alias)
       }
     } catch {
@@ -288,9 +309,8 @@ async function validateSkinsPath(skinsPath: string): Promise<boolean> {
     const entries = await fs.readdir(skinsPath, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const files = await fs.readdir(path.join(skinsPath, entry.name))
-        if (!files.some((f) => /\.(fantome|zip)$/i.test(f))) continue
-        if (championNames.has(entry.name)) return true
+        if (!(await dirHasSkinFiles(path.join(skinsPath, entry.name)))) continue
+        if (championNames.has(entry.name) || championIds.has(entry.name)) return true
       }
       // 顶层平铺的 .fantome（LOL-SKINS 专用格式，普通文件夹中不会出现）
       if (entry.isFile() && /\.fantome$/i.test(entry.name)) return true
@@ -451,6 +471,18 @@ async function getExtraSkins(
   return result
 }
 
+/**
+ * LeagueSkins 排列格式下皮肤是否存在：<英雄目录>/<皮肤id>/<皮肤id>.fantome|.zip
+ */
+async function hasSkinFileById(championDir: string, fullId: number): Promise<boolean> {
+  for (const ext of ['.fantome', '.zip']) {
+    if (await locationExists(path.join(championDir, String(fullId), `${fullId}${ext}`))) {
+      return true
+    }
+  }
+  return false
+}
+
 export async function getExistingSkins(): Promise<Skin[]> {
   const skinsLocation = await getSkinsLocation()
 
@@ -490,6 +522,7 @@ export async function getExistingSkins(): Promise<Skin[]> {
     if (champion) {
       possibleDirs.push(...champion.aliases)
     }
+    possibleDirs.push(String(skin.championId)) // LeagueSkins 用英雄 id 命名目录
 
     let championDir: string | null = null
     for (const dirName of possibleDirs) {
@@ -500,6 +533,11 @@ export async function getExistingSkins(): Promise<Skin[]> {
       }
     }
     if (!championDir) continue
+
+    if (await hasSkinFileById(championDir, skin.championId * 1000 + skin.id)) {
+      existingSkins.push(skin)
+      continue
+    }
 
     const files = await fs.readdir(championDir)
     const normalizedSkinName = skin.name.toLowerCase().replace(/[:\s'"]/g, '').replace(/\u3000/g, '')

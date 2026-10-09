@@ -132,13 +132,16 @@ async function getChampionDirNames(): Promise<Map<string, string[]>> {
 }
 
 /**
- * Resolve the actual champion directory on disk, trying current title and aliases.
+ * Resolve the actual champion directory on disk, trying current title, aliases,
+ * then the numeric champion id (LeagueSkins 排列格式用 id 命名目录)。
  * @returns the full path to the champion directory, or null if not found.
  */
-async function resolveChampionDir(championName: string): Promise<string | null> {
+async function resolveChampionDir(championName: string, championId: number): Promise<string | null> {
   const skinsLocation = await getSkinsLocation()
   const dirNames = await getChampionDirNames()
-  const possibleNames = dirNames.get(championName) || [championName]
+  const possibleNames = [...(dirNames.get(championName) || [championName])]
+  const idDirName = String(championId)
+  if (!possibleNames.includes(idDirName)) possibleNames.push(idDirName)
 
   for (const dirName of possibleNames) {
     const candidateDir = path.join(skinsLocation, dirName)
@@ -208,13 +211,55 @@ async function findFileInDir(dir: string, targetName: string, supersetOnly = fal
   return bestMatch
 }
 
+const SKIN_FILE_EXTS = ['.fantome', '.zip']
+
+/**
+ * 按 LeagueSkins 排列格式查找：<skins>/<英雄id>/<皮肤id>/<皮肤id>.fantome|.zip
+ * 炫彩作为子目录挂在父皮肤下：<skins>/<英雄id>/<父皮肤id>/<炫彩id>/<炫彩id>.fantome
+ * @param fullId 皮肤/炫彩的完整数字 ID（championId * 1000 + n）
+ * @param nested true 表示炫彩：需遍历各皮肤子目录查找
+ * @returns the full file path, or null if not found.
+ */
+async function findSkinFileById(
+  championName: string,
+  championId: number,
+  fullId: number,
+  nested: boolean
+): Promise<string | null> {
+  const championDir = await resolveChampionDir(championName, championId)
+  if (!championDir) return null
+
+  const findIn = async (dir: string): Promise<string | null> => {
+    for (const ext of SKIN_FILE_EXTS) {
+      const candidate = path.join(dir, `${fullId}${ext}`)
+      if (await fs.pathExists(candidate)) return candidate
+    }
+    return null
+  }
+
+  if (!nested) return findIn(path.join(championDir, String(fullId)))
+
+  const entries = await fs.readdir(championDir, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const parentDir = path.join(championDir, entry.name)
+    const found = (await findIn(path.join(parentDir, String(fullId)))) ?? (await findIn(parentDir))
+    if (found) return found
+  }
+  return null
+}
+
 /**
  * Find a chroma file by its numeric ID.
  * Chroma files are stored as {id}.fantome or {id}.zip in the champion directory.
  * @returns the full file path, or null if not found.
  */
-async function findChromaFileById(championName: string, chromaId: number): Promise<string | null> {
-  const championDir = await resolveChampionDir(championName)
+async function findChromaFileById(
+  championName: string,
+  championId: number,
+  chromaId: number
+): Promise<string | null> {
+  const championDir = await resolveChampionDir(championName, championId)
   if (!championDir) return null
 
   // 1. 顶层查找: {chromaId}.fantome 或 {chromaId}.zip（已整理过的结构）
@@ -271,11 +316,12 @@ async function findChromaFileById(championName: string, chromaId: number): Promi
  */
 async function findSkinFile(
   championName: string,
+  championId: number,
   skinName: string,
   isChromaSearch: boolean,
   supersetOnly = false
 ): Promise<string | null> {
-  const championDir = await resolveChampionDir(championName)
+  const championDir = await resolveChampionDir(championName, championId)
   if (!championDir) return null
 
   if (isChromaSearch) {
@@ -320,11 +366,23 @@ async function findSkinFile(
  */
 async function resolveSkinFilePath(skin: Skin | Chroma): Promise<string | null> {
   const chroma = isChroma(skin)
-  if (chroma) {
-    const byId = await findChromaFileById(skin.championName, skin.id)
+
+  // LeagueSkins 排列格式优先：按 id 精确定位，EXTRA 皮肤（负 id）不适用
+  if (skin.id >= 0) {
+    const byId = await findSkinFileById(
+      skin.championName,
+      skin.championId,
+      skin.championId * 1000 + skin.id,
+      chroma
+    )
     if (byId) return byId
   }
-  return findSkinFile(skin.championName, skin.name, chroma, !chroma && skin.id < 0)
+
+  if (chroma) {
+    const byId = await findChromaFileById(skin.championName, skin.championId, skin.id)
+    if (byId) return byId
+  }
+  return findSkinFile(skin.championName, skin.championId, skin.name, chroma, !chroma && skin.id < 0)
 }
 
 /**
