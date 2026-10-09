@@ -7,7 +7,7 @@
 
 import { ipcMain, BrowserWindow, app } from 'electron'
 
-import { askAndSetLeaguePath, isCurrentLeaguePathValid, askAndSelectLocalSkins, getCurrentSkinId, getChampionSkinId, getCloseBehavior, setCloseBehavior, getFloatWindowEnabled, setFloatWindowEnabled, getMultiChampionSkinEnabled, setMultiChampionSkinEnabled, getFloatWindowPosition, setFloatWindowPosition, getLeaguePath, getConfigValue, type FloatWindowPosition } from './config'
+import { askAndSetLeaguePath, isCurrentLeaguePathValid, askAndSelectLocalSkins, getCurrentSkinId, getChampionSkinId, getCloseBehavior, setCloseBehavior, getFloatWindowEnabled, setFloatWindowEnabled, getMultiChampionSkinEnabled, setMultiChampionSkinEnabled, getFloatWindowPosition, setFloatWindowPosition, getFloatWindowAlwaysOnTop, setFloatWindowAlwaysOnTop, getLeaguePath, getConfigValue, type FloatWindowPosition } from './config'
 import { useLocalLolSkins, checkLolSkinsExist, getExistingSkins, invalidateExistingSkinsCache, getSkinsLocation, updateSkinsMetadataFromNetwork, getSkinsMetadataState } from './download'
 import { setSkin, disableSkin, clearAllSkins, getChampionSkinsDetail, invalidateChampionDirCache } from './skins'
 import { type Skin, type Chroma, listSkins, listChampions, invalidateMetadataCache } from './metadata'
@@ -95,6 +95,13 @@ ipcMain.handle('setCloseBehavior', (_, behavior) => setCloseBehavior(behavior))
 ipcMain.handle('getFloatWindowEnabled', getFloatWindowEnabled)
 ipcMain.handle('setFloatWindowEnabled', (_, enabled: boolean) => setFloatWindowEnabled(enabled))
 ipcMain.handle('getFloatWindowPosition', getFloatWindowPosition)
+ipcMain.handle('getFloatWindowAlwaysOnTop', getFloatWindowAlwaysOnTop)
+ipcMain.handle('setFloatWindowAlwaysOnTop', async (_, enabled: boolean) => {
+  await setFloatWindowAlwaysOnTop(enabled)
+  // 立即作用到当前悬浮窗，不用等下次弹出
+  const { applyFloatWindowAlwaysOnTop } = await import('./index')
+  applyFloatWindowAlwaysOnTop()
+})
 ipcMain.handle('setFloatWindowPosition', async (_, position: FloatWindowPosition) => {
   await setFloatWindowPosition(position)
   // 悬浮窗正在显示时立即按新位置重定位；动态 import 避免与 index.ts 循环依赖

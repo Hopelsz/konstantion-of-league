@@ -36,6 +36,9 @@ const api = {
   getFloatWindowEnabled: (): Promise<boolean> => ipcRenderer.invoke('getFloatWindowEnabled'),
   setFloatWindowEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('setFloatWindowEnabled', enabled),
   getFloatWindowPosition: (): Promise<FloatWindowPosition> => ipcRenderer.invoke('getFloatWindowPosition'),
+  getFloatWindowAlwaysOnTop: (): Promise<boolean> => ipcRenderer.invoke('getFloatWindowAlwaysOnTop'),
+  setFloatWindowAlwaysOnTop: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke('setFloatWindowAlwaysOnTop', enabled),
   setFloatWindowPosition: (position: FloatWindowPosition): Promise<void> => ipcRenderer.invoke('setFloatWindowPosition', position),
   getMultiChampionSkinEnabled: (): Promise<boolean> => ipcRenderer.invoke('getMultiChampionSkinEnabled'),
   setMultiChampionSkinEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('setMultiChampionSkinEnabled', enabled),

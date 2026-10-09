@@ -1408,6 +1408,42 @@ svg.cool-border:hover path {
   stroke: #f0e6d2;
 }
 
+/* 悬浮窗置顶开关：置顶时金色高亮，未置顶时灰暗 */
+.float-window-pin {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(30, 35, 40, 0.9);
+  border: 1px solid #3a4a5a;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  -webkit-app-region: no-drag;
+}
+
+.float-window-pin:hover {
+  border-color: #c8aa6e;
+  background: rgba(200, 170, 110, 0.25);
+}
+
+.float-window-pin.active {
+  border-color: #c8aa6e;
+  background: rgba(200, 170, 110, 0.18);
+}
+
+.float-window-pin svg path {
+  fill: #7a8a99;
+  transition: fill 0.3s ease;
+}
+
+.float-window-pin:hover svg path,
+.float-window-pin.active svg path {
+  fill: #f0e6d2;
+}
+
 .float-window-body {
   flex: 1;
   overflow-y: auto;

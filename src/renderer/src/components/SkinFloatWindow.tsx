@@ -11,6 +11,7 @@ export default function SkinFloatWindow(): JSX.Element {
   const [applyingId, setApplyingId] = useState<string | null>(null)  // 正在应用中的皮肤ID
   const [dataLoading, setDataLoading] = useState(false)  // 初次加载皮肤数据
   const [position, setPosition] = useState<FloatWindowPosition>('top')
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrollAnimRef = useRef<number | null>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -49,6 +50,7 @@ export default function SkinFloatWindow(): JSX.Element {
       setChampion(champ)
       // 读取当前悬浮窗位置（上方/下方时切换横向布局）
       setPosition(await window.api.getFloatWindowPosition())
+      setAlwaysOnTop(await window.api.getFloatWindowAlwaysOnTop())
       await loadSkinsFor(champ)
     })
 
@@ -190,6 +192,16 @@ export default function SkinFloatWindow(): JSX.Element {
     }
   }
 
+  const handleTogglePin = async (): Promise<void> => {
+    const next = !alwaysOnTop
+    setAlwaysOnTop(next)
+    try {
+      await window.api.setFloatWindowAlwaysOnTop(next)
+    } catch {
+      setAlwaysOnTop(!next) // 写入失败回滚，避免显示与实际不一致
+    }
+  }
+
   const handleApplyChroma = async (chroma: Chroma): Promise<void> => {
     if (isApplying) return
     const chromaId = `${chroma.championId}-${chroma.id}`
@@ -228,6 +240,15 @@ export default function SkinFloatWindow(): JSX.Element {
         <div className="float-window-header-actions">
           <span className="float-window-skin-count">{championSkins.length} 个皮肤</span>
           <div className="float-window-header-divider" />
+          <button
+            className={`float-window-pin ${alwaysOnTop ? 'active' : ''}`}
+            onClick={handleTogglePin}
+            title={alwaysOnTop ? '已置顶，点击取消置顶' : '未置顶，点击置顶'}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24">
+              <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z" />
+            </svg>
+          </button>
           <button className="float-window-close" onClick={handleClose} title="关闭">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <path d="M18 6L6 18M6 6l12 12" stroke="#a09b8c" strokeWidth="2" strokeLinecap="round" />

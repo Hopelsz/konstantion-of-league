@@ -283,6 +283,16 @@ export async function setFloatWindowPosition(position: FloatWindowPosition): Pro
   await setConfigValue('floatWindowPosition', position)
 }
 
+/** 悬浮窗是否置顶（默认不置顶；全屏游戏下想看见悬浮窗需手动开启） */
+export async function getFloatWindowAlwaysOnTop(): Promise<boolean> {
+  const val = await getConfigValue('floatWindowAlwaysOnTop')
+  return val === 'true'
+}
+
+export async function setFloatWindowAlwaysOnTop(enabled: boolean): Promise<void> {
+  await setConfigValue('floatWindowAlwaysOnTop', String(enabled))
+}
+
 export async function getMultiChampionSkinEnabled(): Promise<boolean> {
   const val = await getConfigValue('multiChampionSkinEnabled')
   // 默认开启（保持向后兼容）

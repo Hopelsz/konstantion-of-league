@@ -89,6 +89,8 @@ export interface Api {
   setFloatWindowEnabled: (enabled: boolean) => Promise<void>
   getFloatWindowPosition: () => Promise<FloatWindowPosition>
   setFloatWindowPosition: (position: FloatWindowPosition) => Promise<void>
+  getFloatWindowAlwaysOnTop: () => Promise<boolean>
+  setFloatWindowAlwaysOnTop: (enabled: boolean) => Promise<void>
   getMultiChampionSkinEnabled: () => Promise<boolean>
   setMultiChampionSkinEnabled: (enabled: boolean) => Promise<void>
   // 浮动窗口

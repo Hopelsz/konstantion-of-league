@@ -12,7 +12,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import './api'
 import { type Champion, listChampions } from './metadata'
-import { getFloatWindowPosition, isCurrentLeaguePathValid } from './config'
+import { getFloatWindowPosition, getFloatWindowAlwaysOnTop, isCurrentLeaguePathValid } from './config'
 import { checkLolSkinsExist, downloadLolSkinsMetadata } from './download'
 import { setLcuHandlers, startLcuMonitor, stopLcuMonitor } from './lcu'
 import { restoreSkinsOnStartup } from './skins'
@@ -213,6 +213,14 @@ export function refreshFloatWindowPosition(): void {
   }
 }
 
+/** 按最新配置应用悬浮窗置顶状态（窗口创建后、开关切换时调用） */
+export function applyFloatWindowAlwaysOnTop(): void {
+  if (!floatWindow || floatWindow.isDestroyed()) return
+  void getFloatWindowAlwaysOnTop().then((enabled) => {
+    floatWindow?.setAlwaysOnTop(enabled)
+  })
+}
+
 function createFloatWindow(): BrowserWindow {
   floatWindow = new BrowserWindow({
     width: FLOAT_VERTICAL_WIDTH,
@@ -222,7 +230,8 @@ function createFloatWindow(): BrowserWindow {
     frame: false,
     resizable: false,
     skipTaskbar: true,
-    alwaysOnTop: true,
+    // 初始值跟随默认（不置顶），创建后由 applyFloatWindowAlwaysOnTop 按配置纠正
+    alwaysOnTop: false,
     backgroundColor: '#091428ff',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -259,6 +268,7 @@ function showFloatWindow(champion: Champion): void {
 
     // 新建窗口：待页面就绪（preload 监听已注册）后再发送，避免数据丢失
     floatWindow = createFloatWindow()
+    applyFloatWindowAlwaysOnTop()
     floatWindow.once('ready-to-show', () => {
       if (floatWindow) {
         computeFloatWindowBounds().then((bounds) => floatWindow?.setBounds(bounds))
