@@ -69,6 +69,12 @@ const api = {
     return () => ipcRenderer.removeListener('float-window-position-changed', handler)
   },
   // 皮肤状态同步
+  // 主进程后台自动更新完皮肤元数据（配置窗口据此刷新提示）
+  onMetadataUpdated: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('metadata-updated', handler)
+    return () => ipcRenderer.removeListener('metadata-updated', handler)
+  },
   onSkinStateChanged: (callback: (championId: number, skinId: string | null) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, championId: number, skinId: string | null) => callback(championId, skinId)
     ipcRenderer.on('skin-state-changed', handler)

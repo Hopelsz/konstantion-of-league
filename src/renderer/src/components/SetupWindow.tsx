@@ -44,6 +44,14 @@ function SetupWindow(): JSX.Element {
     void refreshMetaState()
   }, [refresh, setAlert, hasApi, refreshMetaState])
 
+  // 主进程后台自动更新完皮肤数据后刷新版本状态，及时隐藏过期提示
+  useEffect(() => {
+    if (!hasApi) return
+    return window.api.onMetadataUpdated(() => {
+      void refreshMetaState()
+    })
+  }, [hasApi, refreshMetaState])
+
   // 定时刷新版本状态（与主进程缓存 TTL 一致）：窗口常驻期间新版本上线也能提示
   useEffect(() => {
     if (!hasApi) return
@@ -329,6 +337,29 @@ function SetupWindow(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {/* 皮肤数据过期提示：自动更新失败（如离线）时引导手动更新 */}
+      {metaState && !metaState.upToDate && metaState.latestPatch && busy !== 'metadata' && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 1.3rem',
+            background: 'linear-gradient(90deg, #3a2f14 0%, #241d0e 100%)',
+            borderBottom: '1px solid #785b2866',
+            fontSize: '0.72rem',
+            color: '#f0e6d2'
+          }}
+        >
+          <span style={{ color: gold, flexShrink: 0 }}>↑</span>
+          <span style={{ flex: 1, lineHeight: 1.5 }}>
+            游戏已更新到 {metaState.latestPatch}
+            {metaState.metadataPatch ? `，皮肤数据停留在 ${metaState.metadataPatch}` : ''}
+            ，点右上角更新
+          </span>
+        </div>
+      )}
 
       {/* 内容区 */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '1.2rem 1.3rem' }}>

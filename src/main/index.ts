@@ -7,15 +7,37 @@
  * └───────────────────────────────────────────────────────────────────────────────┘
  */
 
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  Tray,
+  Menu,
+  nativeImage,
+  screen,
+  Notification
+} from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import './api'
-import { type Champion, listChampions } from './metadata'
-import { getFloatWindowPosition, getFloatWindowAlwaysOnTop, isCurrentLeaguePathValid } from './config'
-import { checkLolSkinsExist, downloadLolSkinsMetadata } from './download'
-import { setLcuHandlers, startLcuMonitor, stopLcuMonitor } from './lcu'
-import { restoreSkinsOnStartup } from './skins'
+import { type Champion, listChampions, invalidateMetadataCache } from './metadata'
+import {
+  getFloatWindowPosition,
+  getFloatWindowAlwaysOnTop,
+  isCurrentLeaguePathValid,
+  getConfigValue,
+  setConfigValue
+} from './config'
+import {
+  checkLolSkinsExist,
+  downloadLolSkinsMetadata,
+  getSkinsMetadataState,
+  updateSkinsMetadataFromNetwork,
+  invalidateExistingSkinsCache
+} from './download'
+import { setLcuHandlers, startLcuMonitor, stopLcuMonitor, invalidateChampionMap } from './lcu'
+import { restoreSkinsOnStartup, invalidateChampionDirCache } from './skins'
 
 import icon from '../../resources/icon.png?asset'
 import trayIconPath from '../../build/icon.ico?asset'
@@ -328,6 +350,44 @@ async function isConfigured(): Promise<boolean> {
   return pathOk && skinsOk
 }
 
+/**
+ * 启动自检：线上游戏版本比本地皮肤数据新时后台自动更新，用户无需手动点更新按钮。
+ * 更新失败（离线等）保留旧数据，并弹一次托盘通知引导手动更新——
+ * 同一版本只提醒一次，避免离线时每次启动都弹。
+ */
+async function autoUpdateSkinsMetadata(): Promise<void> {
+  let stale: { latestPatch: string; metadataPatch: string | null } | null = null
+  try {
+    const state = await getSkinsMetadataState()
+    if (state.upToDate || !state.latestPatch) return
+    stale = { latestPatch: state.latestPatch, metadataPatch: state.metadataPatch }
+
+    const count = await updateSkinsMetadataFromNetwork()
+    invalidateMetadataCache()
+    invalidateExistingSkinsCache()
+    invalidateChampionMap()
+    invalidateChampionDirCache()
+    console.log(
+      `[metadata] 游戏已更新（${stale.metadataPatch ?? '未知'} → ${stale.latestPatch}），` +
+        `已自动更新 ${count} 条皮肤数据`
+    )
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('metadata-updated')
+    }
+    return
+  } catch (err) {
+    console.warn('[metadata] 自动更新皮肤数据失败，保持旧数据:', err)
+  }
+
+  if (!stale) return
+  if ((await getConfigValue('metadataRemindPatch')) === stale.latestPatch) return
+  await setConfigValue('metadataRemindPatch', stale.latestPatch).catch(() => {})
+  new Notification({
+    title: '皮肤数据有更新',
+    body: `游戏已更新到 ${stale.latestPatch}，打开配置窗口点右上角更新按钮`
+  }).show()
+}
+
 async function boot(): Promise<void> {
   // LCU 事件由主进程直接驱动悬浮窗（无需任何渲染窗口存活）
   setLcuHandlers({
@@ -341,6 +401,9 @@ async function boot(): Promise<void> {
   } catch (err) {
     console.warn('元数据初始化失败:', err)
   }
+
+  // 游戏更新后自动刷新皮肤数据（后台进行，失败不阻塞启动）
+  void autoUpdateSkinsMetadata()
 
   // 启动恢复记忆皮肤：上一会话的 overlay 随进程退出消亡，但配置仍记着
   // 各英雄的皮肤（悬浮窗会显示"已应用"角标），这里重建 mod/overlay 使其

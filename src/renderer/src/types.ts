@@ -98,6 +98,8 @@ export interface Api {
   hideFloatWindow: () => void
   onFloatChampionData: (callback: (champion: Champion) => void) => () => void
   onFloatWindowPositionChanged: (callback: (position: FloatWindowPosition) => void) => () => void
+  // 皮肤元数据被后台自动更新
+  onMetadataUpdated: (callback: () => void) => () => void
   // 皮肤状态同步
   onSkinStateChanged: (callback: (championId: number, skinId: string | null) => void) => () => void
   // LCU 通信事件
